@@ -3,6 +3,7 @@ from fastapi.security import HTTPBearer
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from datetime import datetime
+from typing import List, Optional
 import random
 from bson import ObjectId
 import json
@@ -88,7 +89,7 @@ def product_to_response(product):
         "category": product["category"],
         "price": product["price"],
         "stock_quantity": product.get("stock_quantity", 0),
-        "image_url": product.get("image_url"),
+        "images": product.get("images", []),  # Changed from image_url to images array
         "specifications": product.get("specifications", {}),
         "is_available": product.get("is_available", True),
         "created_at": product.get("created_at"),
@@ -108,8 +109,9 @@ def create_notification(user_id, title, message, request_id=None):
     notifications_db.insert_one(notification)
 
 # File upload utility functions
-ALLOWED_IMAGE_TYPES = ["image/jpeg", "image/png", "image/webp"]
+ALLOWED_IMAGE_TYPES = ["image/jpeg", "image/png", "image/webp", "image/jpg"]
 MAX_FILE_SIZE = 5 * 1024 * 1024  # 5MB
+MAX_IMAGES_PER_PRODUCT = 5
 
 async def save_product_image(file: UploadFile) -> str:
     """Save product image and return the file path"""
@@ -118,33 +120,38 @@ async def save_product_image(file: UploadFile) -> str:
     if file.content_type not in ALLOWED_IMAGE_TYPES:
         raise HTTPException(
             status_code=400, 
-            detail="Only JPEG, PNG, and WebP images are allowed"
+            detail=f"File type {file.content_type} not allowed. Only JPEG, PNG, and WebP are supported"
         )
     
     # Validate file size
     contents = await file.read()
+    await file.seek(0)  # Reset file pointer for future reads
+    
     if len(contents) > MAX_FILE_SIZE:
         raise HTTPException(
             status_code=400,
-            detail="File size too large. Maximum size is 5MB"
+            detail=f"File size {len(contents)/1024/1024:.1f}MB too large. Maximum size is 5MB"
         )
     
     # Generate unique filename
-    file_extension = file.filename.split('.')[-1]
-    filename = f"{random.randint(1000, 9999)}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.{file_extension}"
+    file_extension = file.filename.split('.')[-1].lower()
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    random_num = random.randint(1000, 9999)
+    filename = f"product_{timestamp}_{random_num}.{file_extension}"
     filepath = f"static/products/{filename}"
     
     try:
         # Save file
         with open(filepath, "wb") as f:
             f.write(contents)
+        
+        return f"/static/products/{filename}"
+        
     except Exception as e:
         raise HTTPException(
             status_code=400,
             detail=f"Error saving image: {str(e)}"
         )
-    
-    return f"/static/products/{filename}"
 
 def delete_product_image(image_url: str):
     """Delete product image file"""
@@ -152,9 +159,12 @@ def delete_product_image(image_url: str):
         filename = image_url.split("/")[-1]
         filepath = f"static/products/{filename}"
         if os.path.exists(filepath):
-            os.remove(filepath)
+            try:
+                os.remove(filepath)
+            except Exception as e:
+                print(f"Error deleting image {filepath}: {str(e)}")
 
-# Create default admin and sample products on startup
+# Create default admin on startup
 @app.on_event("startup")
 async def startup():
     admin = users_db.find_one({"email": "admin@firesafety.mw"})
@@ -169,62 +179,8 @@ async def startup():
         })
         print("✅ Default admin created: admin@firesafety.mw / admin123")
     
-    # Add sample products if none exist
-    if products_db.count_documents({}) == 0:
-        sample_products = [
-            {
-                "name": "ABC Powder Fire Extinguisher 6kg",
-                "description": "Multi-purpose dry powder extinguisher suitable for Class A, B, and C fires",
-                "category": "fire_extinguishers",
-                "price": 45000.00,
-                "stock_quantity": 25,
-                "specifications": {
-                    "weight": "6kg",
-                    "fire_class": "A, B, C",
-                    "discharge_time": "15 seconds",
-                    "coverage": "5-7 meters",
-                    "warranty": "5 years"
-                },
-                "is_available": True,
-                "created_at": datetime.utcnow(),
-                "updated_at": datetime.utcnow()
-            },
-            {
-                "name": "CO2 Fire Extinguisher 5kg",
-                "description": "Carbon dioxide extinguisher ideal for electrical and flammable liquid fires",
-                "category": "fire_extinguishers",
-                "price": 65000.00,
-                "stock_quantity": 15,
-                "specifications": {
-                    "weight": "5kg",
-                    "fire_class": "B, C, Electrical",
-                    "discharge_time": "10 seconds",
-                    "coverage": "2-3 meters",
-                    "warranty": "10 years"
-                },
-                "is_available": True,
-                "created_at": datetime.utcnow(),
-                "updated_at": datetime.utcnow()
-            },
-            {
-                "name": "Fire Safety Helmet",
-                "description": "Professional firefighter helmet with heat resistance and face shield",
-                "category": "safety_equipment",
-                "price": 25000.00,
-                "stock_quantity": 30,
-                "specifications": {
-                    "material": "Thermoplastic",
-                    "color": "Yellow",
-                    "size": "Adjustable",
-                    "standard": "EN443"
-                },
-                "is_available": True,
-                "created_at": datetime.utcnow(),
-                "updated_at": datetime.utcnow()
-            }
-        ]
-        products_db.insert_many(sample_products)
-        print("✅ Sample products created")
+    # NOTE: Removed hardcoded sample products
+    # Products should now be added through the admin interface
 
 # AUTH ENDPOINTS
 @app.post("/api/auth/register")
@@ -342,10 +298,10 @@ async def create_product(
     stock_quantity: int = Form(0),
     specifications: str = Form("{}"),
     is_available: bool = Form(True),
-    image: UploadFile = File(None),
+    images: List[UploadFile] = File([]),  # Changed to support multiple images
     admin: dict = Depends(get_current_admin)
 ):
-    """Create a new product (admin only)"""
+    """Create a new product with multiple images (admin only)"""
     try:
         # Parse specifications
         specs_dict = {}
@@ -355,10 +311,17 @@ async def create_product(
             except json.JSONDecodeError:
                 raise HTTPException(status_code=400, detail="Invalid specifications format")
         
-        # Handle image upload
-        image_url = None
-        if image and image.filename:
-            image_url = await save_product_image(image)
+        # Handle image uploads (limit to 5 images)
+        image_urls = []
+        for i, image in enumerate(images[:MAX_IMAGES_PER_PRODUCT]):  # Limit to first 5 images
+            if image and image.filename:
+                try:
+                    image_url = await save_product_image(image)
+                    image_urls.append(image_url)
+                except HTTPException as e:
+                    # Skip invalid images but continue with others
+                    print(f"Error uploading image {i+1}: {str(e)}")
+                    continue
         
         product_data = {
             "name": name,
@@ -367,7 +330,7 @@ async def create_product(
             "price": price,
             "stock_quantity": stock_quantity,
             "specifications": specs_dict,
-            "image_url": image_url,
+            "images": image_urls,  # Store as array
             "is_available": is_available,
             "created_at": datetime.utcnow(),
             "updated_at": datetime.utcnow()
@@ -435,10 +398,11 @@ async def update_product(
     stock_quantity: int = Form(None),
     specifications: str = Form(None),
     is_available: bool = Form(None),
-    image: UploadFile = File(None),
+    images: List[UploadFile] = File([]),  # Changed to support multiple files
+    existing_images: List[str] = Form([]),  # New parameter for keeping existing images
     admin: dict = Depends(get_current_admin)
 ):
-    """Update product (admin only)"""
+    """Update product with multiple images (admin only)"""
     if not ObjectId.is_valid(product_id):
         raise HTTPException(status_code=400, detail="Invalid product ID")
     
@@ -469,15 +433,42 @@ async def update_product(
         except json.JSONDecodeError:
             raise HTTPException(status_code=400, detail="Invalid specifications format")
     
-    # Handle image upload
-    if image and image.filename:
-        # Delete old image if exists
-        if product.get("image_url"):
-            delete_product_image(product["image_url"])
-        
-        # Save new image
-        image_url = await save_product_image(image)
-        update_data["image_url"] = image_url
+    # Handle images - combine existing and new images
+    image_urls = []
+    
+    # Add existing images (sent as JSON string from frontend)
+    if existing_images:
+        if isinstance(existing_images, str):
+            # Parse if sent as JSON string
+            try:
+                existing_images_list = json.loads(existing_images)
+                image_urls.extend(existing_images_list)
+            except:
+                # If not JSON, treat as single string
+                image_urls.append(existing_images)
+        elif isinstance(existing_images, list):
+            image_urls.extend(existing_images)
+    
+    # Add new images
+    for i, image in enumerate(images[:MAX_IMAGES_PER_PRODUCT]):
+        if image and image.filename:
+            try:
+                image_url = await save_product_image(image)
+                image_urls.append(image_url)
+            except HTTPException as e:
+                print(f"Error uploading image {i+1}: {str(e)}")
+                continue
+    
+    # Remove duplicates and limit to MAX_IMAGES_PER_PRODUCT
+    image_urls = list(dict.fromkeys(image_urls))[:MAX_IMAGES_PER_PRODUCT]
+    
+    # Delete old images that are no longer needed
+    old_images = product.get("images", [])
+    for old_image in old_images:
+        if old_image not in image_urls:
+            delete_product_image(old_image)
+    
+    update_data["images"] = image_urls
     
     if update_data:
         update_data["updated_at"] = datetime.utcnow()
@@ -499,9 +490,9 @@ async def delete_product(product_id: str, admin: dict = Depends(get_current_admi
     if not product:
         raise HTTPException(status_code=404, detail="Product not found")
     
-    # Delete associated image
-    if product.get("image_url"):
-        delete_product_image(product["image_url"])
+    # Delete all associated images
+    for image_url in product.get("images", []):
+        delete_product_image(image_url)
     
     # Delete product
     products_db.delete_one({"_id": ObjectId(product_id)})
@@ -604,6 +595,47 @@ async def get_admin_stats(admin: dict = Depends(get_current_admin)):
         "total_products": total_products,
         "low_stock_products": low_stock_products
     }
+
+# Additional admin endpoints
+@app.get("/api/admin/users")
+async def get_all_users(admin: dict = Depends(get_current_admin)):
+    """Get all users (admin only)"""
+    users = list(users_db.find({"role": {"$ne": "admin"}}).sort("created_at", -1))
+    return {"users": [user_to_response(user) for user in users]}
+
+# File upload endpoint (optional)
+@app.post("/api/upload")
+async def upload_file(file: UploadFile = File(...), user: dict = Depends(get_current_user)):
+    """General file upload endpoint"""
+    try:
+        # Validate file type
+        if not file.content_type.startswith('image/'):
+            raise HTTPException(status_code=400, detail="Only image files are allowed")
+        
+        # Validate file size
+        contents = await file.read()
+        if len(contents) > MAX_FILE_SIZE:
+            raise HTTPException(status_code=400, detail="File size too large")
+        
+        await file.seek(0)
+        
+        # Generate unique filename
+        file_extension = file.filename.split('.')[-1].lower()
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        random_num = random.randint(1000, 9999)
+        filename = f"upload_{timestamp}_{random_num}.{file_extension}"
+        filepath = f"static/uploads/{filename}"
+        
+        # Save file
+        with open(filepath, "wb") as f:
+            f.write(contents)
+        
+        return {"success": True, "file_url": f"/static/uploads/{filename}"}
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 @app.get("/")
 async def root():
