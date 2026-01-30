@@ -1,19 +1,46 @@
-from pydantic import BaseModel, EmailStr, Field, validator
-from typing import Optional, List, Dict
+from pydantic import BaseModel, EmailStr, Field, validator, ConfigDict
+from pydantic_core import core_schema
+from typing import Optional, List, Dict, Any, Annotated
 from datetime import datetime
 from enum import Enum
 from bson import ObjectId
+from pydantic.json_schema import JsonSchemaValue
 
+# Custom ObjectId handling for Pydantic v2
 class PyObjectId(str):
     @classmethod
-    def __get_validators__(cls):
-        yield cls.validate
+    def validate_object_id(cls, v, handler) -> str:
+        if isinstance(v, ObjectId):
+            return str(v)
+        if isinstance(v, str):
+            if ObjectId.is_valid(v):
+                return v
+        raise ValueError("Invalid ObjectId")
 
     @classmethod
-    def validate(cls, v):
-        if not ObjectId.is_valid(v):
-            raise ValueError("Invalid ObjectId")
-        return str(v)
+    def __get_pydantic_core_schema__(cls, source_type, handler) -> core_schema.CoreSchema:
+        return core_schema.with_info_after_validator_function(
+            cls.validate_object_id,
+            core_schema.str_schema(),
+            serialization=core_schema.to_string_ser_schema(),
+        )
+
+    @classmethod
+    def __get_pydantic_json_schema__(cls, core_schema, handler) -> JsonSchemaValue:
+        json_schema = handler(core_schema)
+        json_schema.update(type='string', format='objectid')
+        return json_schema
+
+# Base model with common config for MongoDB
+class MongoBaseModel(BaseModel):
+    model_config = ConfigDict(
+        arbitrary_types_allowed=True,
+        populate_by_name=True,
+        json_encoders={
+            ObjectId: lambda oid: str(oid),
+            datetime: lambda dt: dt.isoformat()
+        }
+    )
 
 class UserRole(str, Enum):
     ADMIN = "admin"
@@ -51,7 +78,8 @@ class PaymentStatus(str, Enum):
 
 class PaymentMethod(str, Enum):
     CASH = "cash"
-    MOBILE_MONEY = "mobile_money"
+    MPESA = "mpesa"
+    AIRTEL_MONEY = "airtel_money"
     BANK_TRANSFER = "bank_transfer"
     CARD = "card"
 
@@ -90,16 +118,13 @@ class UserLogin(BaseModel):
     email: EmailStr
     password: str
 
-class UserResponse(BaseModel):
+class UserResponse(MongoBaseModel):
     id: PyObjectId
     email: EmailStr
     full_name: str
     phone: str
     role: UserRole
     created_at: datetime
-
-    class Config:
-        json_encoders = {ObjectId: str}
 
 class ServiceRequestCreate(BaseModel):
     service_type: ServiceType
@@ -114,7 +139,7 @@ class ServiceRequestUpdate(BaseModel):
     completion_notes: Optional[str] = None
     assigned_to: Optional[str] = None
 
-class ServiceRequestResponse(BaseModel):
+class ServiceRequestResponse(MongoBaseModel):
     id: PyObjectId
     request_number: str
     client_id: PyObjectId
@@ -133,9 +158,6 @@ class ServiceRequestResponse(BaseModel):
     updated_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
 
-    class Config:
-        json_encoders = {ObjectId: str}
-
 class ProductCategory(str, Enum):
     FIRE_EXTINGUISHERS = "fire_extinguishers"
     SAFETY_EQUIPMENT = "safety_equipment"
@@ -149,7 +171,7 @@ class ProductCreate(BaseModel):
     category: ProductCategory
     price: float = Field(..., gt=0)
     stock_quantity: int = Field(default=0, ge=0)
-    images: List[str] = []  # Changed from image_url to images array
+    images: List[str] = []
     specifications: Optional[Dict[str, str]] = None
     is_available: bool = True
 
@@ -175,7 +197,7 @@ class ProductUpdate(BaseModel):
             raise ValueError("Maximum 5 images allowed per product")
         return v
 
-class ProductResponse(BaseModel):
+class ProductResponse(MongoBaseModel):
     id: PyObjectId
     name: str
     description: str
@@ -187,9 +209,6 @@ class ProductResponse(BaseModel):
     is_available: bool
     created_at: datetime
     updated_at: Optional[datetime] = None
-
-    class Config:
-        json_encoders = {ObjectId: str}
 
 # Order Management Models
 class OrderItemCreate(BaseModel):
@@ -205,7 +224,7 @@ class OrderItemCreate(BaseModel):
 class OrderCreate(BaseModel):
     items: List[OrderItemCreate] = Field(..., min_items=1)
     shipping_address: str
-    billing_address: Optional[str] = None
+    phone_number: str
     payment_method: PaymentMethod
     shipping_fee: float = Field(default=0, ge=0)
     notes: Optional[str] = None
@@ -219,7 +238,18 @@ class PaymentStatusUpdate(BaseModel):
     payment_method: Optional[PaymentMethod] = None
     amount_paid: Optional[float] = Field(None, ge=0)
 
-class OrderResponse(BaseModel):
+class OrderItemResponse(MongoBaseModel):
+    id: PyObjectId
+    order_id: PyObjectId
+    product_id: PyObjectId
+    product_name: str
+    product_image: Optional[str]
+    quantity: int
+    unit_price: float
+    total_price: float
+    created_at: datetime
+
+class OrderResponse(MongoBaseModel):
     id: PyObjectId
     order_number: str
     client_id: PyObjectId
@@ -239,24 +269,31 @@ class OrderResponse(BaseModel):
     created_at: datetime
     updated_at: Optional[datetime] = None
     items_count: int
-    items: Optional[List['OrderItemResponse']] = None
+    items: Optional[List[OrderItemResponse]] = None
 
-    class Config:
-        json_encoders = {ObjectId: str}
+# CHECKOUT SPECIFIC MODEL
+class CheckoutRequest(BaseModel):
+    items: List[Dict[str, Any]] = Field(..., min_items=1)
+    total_amount: float = Field(..., gt=0)
+    shipping_address: str
+    phone_number: str
+    payment_method: PaymentMethod = PaymentMethod.CASH
+    notes: Optional[str] = None
 
-class OrderItemResponse(BaseModel):
-    id: PyObjectId
-    order_id: PyObjectId
-    product_id: PyObjectId
-    product_name: str
-    product_image: Optional[str]
-    quantity: int
-    unit_price: float
-    total_price: float
+class CheckoutResponse(BaseModel):
+    success: bool = True
+    message: str = "Order created successfully"
+    order_id: str  # Changed from PyObjectId to str for simpler serialization
+    order_number: str
+    total_amount: float
     created_at: datetime
+    items_count: int
 
-    class Config:
-        json_encoders = {ObjectId: str}
+    model_config = ConfigDict(
+        json_encoders={
+            datetime: lambda dt: dt.isoformat()
+        }
+    )
 
 # Transaction Models
 class TransactionCreate(BaseModel):
@@ -279,7 +316,7 @@ class TransactionCreate(BaseModel):
             raise ValueError("Invalid request ID format")
         return v
 
-class TransactionResponse(BaseModel):
+class TransactionResponse(MongoBaseModel):
     id: PyObjectId
     transaction_number: str
     order_id: Optional[PyObjectId] = None
@@ -296,9 +333,6 @@ class TransactionResponse(BaseModel):
     created_at: datetime
     processed_at: Optional[datetime] = None
 
-    class Config:
-        json_encoders = {ObjectId: str}
-
 # Expense Models
 class ExpenseCreate(BaseModel):
     category: ExpenseCategory
@@ -314,7 +348,7 @@ class ExpenseUpdate(BaseModel):
     status: Optional[ExpenseStatus] = None
     receipt_image: Optional[str] = None
 
-class ExpenseResponse(BaseModel):
+class ExpenseResponse(MongoBaseModel):
     id: PyObjectId
     expense_number: str
     category: ExpenseCategory
@@ -327,11 +361,8 @@ class ExpenseResponse(BaseModel):
     created_at: datetime
     updated_at: Optional[datetime] = None
 
-    class Config:
-        json_encoders = {ObjectId: str}
-
 # Notification Models
-class NotificationResponse(BaseModel):
+class NotificationResponse(MongoBaseModel):
     id: PyObjectId
     user_id: PyObjectId
     title: str
@@ -340,9 +371,6 @@ class NotificationResponse(BaseModel):
     order_id: Optional[PyObjectId] = None
     request_id: Optional[PyObjectId] = None
     created_at: datetime
-
-    class Config:
-        json_encoders = {ObjectId: str}
 
 # Dashboard/Stats Models
 class RevenueSummary(BaseModel):
@@ -387,11 +415,3 @@ class ServicePaymentCreate(BaseModel):
 
 class QuoteUpdate(BaseModel):
     quote_amount: float = Field(..., gt=0)
-
-# Forward references for recursive models
-OrderResponse.update_forward_refs()
-OrderItemResponse.update_forward_refs()
-TransactionResponse.update_forward_refs()
-ExpenseResponse.update_forward_refs()
-NotificationResponse.update_forward_refs()
-ServiceRequestResponse.update_forward_refs()
