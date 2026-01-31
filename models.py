@@ -224,10 +224,25 @@ class OrderItemCreate(BaseModel):
 class OrderCreate(BaseModel):
     items: List[OrderItemCreate] = Field(..., min_items=1)
     shipping_address: str
-    phone_number: str
+    phone: Optional[str] = None  # Changed from phone_number to match main.py
     payment_method: PaymentMethod
     shipping_fee: float = Field(default=0, ge=0)
     notes: Optional[str] = None
+    
+    class Config:
+        schema_extra = {
+            "example": {
+                "items": [
+                    {"product_id": "507f1f77bcf86cd799439011", "quantity": 2},
+                    {"product_id": "507f1f77bcf86cd799439012", "quantity": 1}
+                ],
+                "shipping_address": "123 Main St, Blantyre",
+                "phone": "+265 123 456 789",
+                "payment_method": "cash",
+                "shipping_fee": 5000.0,
+                "notes": "Please deliver after 5 PM"
+            }
+        }
 
 class OrderStatusUpdate(BaseModel):
     status: OrderStatus
@@ -264,7 +279,6 @@ class OrderResponse(MongoBaseModel):
     payment_method: PaymentMethod
     payment_status: PaymentStatus
     shipping_address: str
-    billing_address: Optional[str]
     notes: Optional[str]
     created_at: datetime
     updated_at: Optional[datetime] = None
@@ -276,7 +290,7 @@ class CheckoutRequest(BaseModel):
     items: List[Dict[str, Any]] = Field(..., min_items=1)
     total_amount: float = Field(..., gt=0)
     shipping_address: str
-    phone_number: str
+    phone: str  # Changed from phone_number
     payment_method: PaymentMethod = PaymentMethod.CASH
     notes: Optional[str] = None
 
