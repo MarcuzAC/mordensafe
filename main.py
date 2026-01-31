@@ -113,21 +113,28 @@ def product_to_response(product):
     }
 
 def order_to_response(order):
+    """Convert MongoDB order document to API response"""
+    # Helper function to safely convert ObjectId to string
+    def safe_objectid_to_string(value):
+        if isinstance(value, ObjectId):
+            return str(value)
+        return value
+    
     response = {
-        "id": str(order["_id"]),
-        "order_number": order["order_number"],
-        "client_id": str(order["client_id"]),
-        "client_name": order.get("client_name"),
-        "client_email": order.get("client_email"),
-        "client_phone": order.get("client_phone"),
-        "status": order["status"],
-        "subtotal": order["subtotal"],
+        "id": safe_objectid_to_string(order.get("_id", "")),
+        "order_number": order.get("order_number", ""),
+        "client_id": safe_objectid_to_string(order.get("client_id", "")),
+        "client_name": order.get("client_name", ""),
+        "client_email": order.get("client_email", ""),
+        "client_phone": order.get("client_phone", ""),
+        "status": order.get("status", "pending"),
+        "subtotal": order.get("subtotal", 0),
         "tax": order.get("tax", 0),
         "shipping_fee": order.get("shipping_fee", 0),
-        "total_amount": order["total_amount"],
-        "payment_method": order.get("payment_method"),
+        "total_amount": order.get("total_amount", 0),
+        "payment_method": order.get("payment_method", "cash"),
         "payment_status": order.get("payment_status", "pending"),
-        "shipping_address": order.get("shipping_address"),
+        "shipping_address": order.get("shipping_address", ""),
         "notes": order.get("notes"),
         "created_at": order.get("created_at"),
         "updated_at": order.get("updated_at"),
@@ -135,9 +142,20 @@ def order_to_response(order):
         "items": []
     }
     
-    # Get order items if needed
-    if "items" in order:
-        response["items"] = order["items"]
+    # Handle items if they exist in the order document
+    if "items" in order and order["items"]:
+        for item in order["items"]:
+            response["items"].append({
+                "id": safe_objectid_to_string(item.get("_id", "")),
+                "order_id": safe_objectid_to_string(order.get("_id", "")),
+                "product_id": safe_objectid_to_string(item.get("product_id", "")),
+                "product_name": item.get("product_name", ""),
+                "product_image": item.get("product_image"),
+                "quantity": item.get("quantity", 0),
+                "unit_price": item.get("unit_price", 0),
+                "total_price": item.get("total_price", 0),
+                "created_at": item.get("created_at")
+            })
     
     return response
 
