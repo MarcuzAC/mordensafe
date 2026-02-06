@@ -91,11 +91,32 @@ def generate_order_invoice(order_data: dict, customer: dict):
         except:
             pass  # If logo fails to load, continue without it
     
+    # Handle created_at date - check if it's a string or datetime object
+    created_at = order_data.get('created_at')
+    if created_at:
+        if isinstance(created_at, str):
+            try:
+                # Try to parse the string date
+                if 'T' in created_at:
+                    created_at_dt = datetime.fromisoformat(created_at.replace('Z', '+00:00'))
+                else:
+                    created_at_dt = datetime.strptime(created_at, '%Y-%m-%d %H:%M:%S')
+                order_date = created_at_dt.strftime('%d/%m/%Y')
+            except:
+                order_date = datetime.now().strftime('%d/%m/%Y')
+        elif isinstance(created_at, datetime):
+            # It's already a datetime object
+            order_date = created_at.strftime('%d/%m/%Y')
+        else:
+            order_date = datetime.now().strftime('%d/%m/%Y')
+    else:
+        order_date = datetime.now().strftime('%d/%m/%Y')
+    
     # Add company info next to logo using a table
     company_data = [
         ["Modern Safety Systems", f"Invoice #{order_data['order_number']}"],
         ["P.O. Box 1234", f"Date: {datetime.now().strftime('%d/%m/%Y')}"],
-        ["Lilongwe, Malawi", f"Order Date: {datetime.strptime(order_data['created_at'], '%Y-%m-%dT%H:%M:%S.%fZ').strftime('%d/%m/%Y') if 'created_at' in order_data else datetime.now().strftime('%d/%m/%Y')}"],
+        ["Lilongwe, Malawi", f"Order Date: {order_date}"],
         ["Phone: +265 999 756 168", "Payment Terms: Due on Receipt"],
         ["Email: info@modernsafety.mw", ""],
         ["Website: www.modernsafety.mw", ""]
@@ -150,9 +171,9 @@ def generate_order_invoice(order_data: dict, customer: dict):
     story.append(Paragraph("BILL TO", header_style))
     
     client_info = [
-        ["Client Name:", customer['full_name']],
-        ["Email:", customer['email']],
-        ["Phone:", customer['phone']],
+        ["Client Name:", customer.get('full_name', 'Not specified')],
+        ["Email:", customer.get('email', 'Not specified')],
+        ["Phone:", customer.get('phone', 'Not specified')],
         ["Shipping Address:", order_data.get('shipping_address', 'Not specified')],
         ["Billing Address:", order_data.get('billing_address', order_data.get('shipping_address', 'Not specified'))]
     ]
