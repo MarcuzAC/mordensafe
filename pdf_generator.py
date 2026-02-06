@@ -18,15 +18,27 @@ def generate_receipt(service_request: dict, customer: dict):
     c = canvas.Canvas(filepath, pagesize=A4)
     width, height = A4
     
+    # Add Logo in top-left corner
+    logo_path = "src/assets/logo.png"
+    if os.path.exists(logo_path):
+        try:
+            # Add logo in top-left corner (50px from left, 50px from top)
+            logo_size = 60  # 60px
+            logo_x = 50
+            logo_y = height - 50 - logo_size  # 50px from top
+            c.drawImage(logo_path, logo_x, logo_y, width=logo_size, height=logo_size, preserveAspectRatio=True)
+        except:
+            pass  # If logo fails to load, continue without it
+    
     # Header
     c.setFont("Helvetica-Bold", 16)
-    c.drawString(50, height - 50, "FIRE EXTINGUISHER SERVICE RECEIPT")
+    c.drawString(50 + 70, height - 50, "FIRE EXTINGUISHER SERVICE RECEIPT")  # Offset for logo
     
     # Company Info
     c.setFont("Helvetica", 10)
-    c.drawString(50, height - 80, "Modern Safety Systems")
-    c.drawString(50, height - 95, "Phone: +265 999 756 168")
-    c.drawString(50, height - 110, "Email: info@modernsafety.mw")
+    c.drawString(50 + 70, height - 80, "Modern Safety Systems")
+    c.drawString(50 + 70, height - 95, "Phone: +265 999 756 168")
+    c.drawString(50 + 70, height - 110, "Email: info@modernsafety.mw")
     
     # Receipt Details
     c.drawString(400, height - 50, f"Receipt: #{service_request['request_number']}")
@@ -54,7 +66,7 @@ def generate_receipt(service_request: dict, customer: dict):
     return filepath
 
 def generate_order_invoice(order_data: dict, customer: dict):
-    """Generate PDF invoice for an order"""
+    """Generate PDF invoice for an order with logo"""
     # Create invoices directory if it doesn't exist
     os.makedirs("static/invoices", exist_ok=True)
     
@@ -69,82 +81,70 @@ def generate_order_invoice(order_data: dict, customer: dict):
     # Get styles
     styles = getSampleStyleSheet()
     
+    # Create a header with logo and company info
+    logo_path = "src/assets/logo.png"
+    if os.path.exists(logo_path):
+        try:
+            logo = Image(logo_path, width=60, height=60)
+            logo.hAlign = 'LEFT'
+            story.append(logo)
+        except:
+            pass  # If logo fails to load, continue without it
+    
+    # Add company info next to logo using a table
+    company_data = [
+        ["Modern Safety Systems", f"Invoice #{order_data['order_number']}"],
+        ["P.O. Box 1234", f"Date: {datetime.now().strftime('%d/%m/%Y')}"],
+        ["Lilongwe, Malawi", f"Order Date: {datetime.strptime(order_data['created_at'], '%Y-%m-%dT%H:%M:%S.%fZ').strftime('%d/%m/%Y') if 'created_at' in order_data else datetime.now().strftime('%d/%m/%Y')}"],
+        ["Phone: +265 999 756 168", "Payment Terms: Due on Receipt"],
+        ["Email: info@modernsafety.mw", ""],
+        ["Website: www.modernsafety.mw", ""]
+    ]
+    
+    company_table = Table(company_data, colWidths=[3*inch, 3*inch])
+    company_table.setStyle(TableStyle([
+        ('ALIGN', (0, 0), (0, -1), 'LEFT'),
+        ('ALIGN', (1, 0), (1, -1), 'RIGHT'),
+        ('FONTNAME', (0, 0), (-1, -1), 'Helvetica'),
+        ('FONTSIZE', (0, 0), (-1, -1), 10),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
+        ('LEFTPADDING', (0, 0), (0, -1), 0),
+        ('RIGHTPADDING', (1, 0), (1, -1), 0),
+    ]))
+    
+    story.append(company_table)
+    story.append(Spacer(1, 20))
+    
     # Title style
     title_style = ParagraphStyle(
         'Title',
         parent=styles['Heading1'],
-        fontSize=24,
+        fontSize=20,
         alignment=TA_CENTER,
-        spaceAfter=30
+        spaceAfter=20,
+        textColor=colors.HexColor('#1e40af')  # Blue color for title
     )
+    
+    # Add invoice title
+    story.append(Paragraph("INVOICE", title_style))
     
     # Header style
     header_style = ParagraphStyle(
         'Header',
         parent=styles['Heading2'],
-        fontSize=14,
-        spaceAfter=12
+        fontSize=12,
+        spaceAfter=8,
+        textColor=colors.HexColor('#334155')  # Dark gray
     )
     
     # Normal style
-    normal_style = styles['Normal']
-    
-    # Add title
-    story.append(Paragraph("INVOICE", title_style))
-    
-    # Company info
-    company_info = [
-        ["Modern Safety Systems", ""],
-        ["P.O. Box 1234", ""],
-        ["Lilongwe, Malawi", ""],
-        ["Phone: +265 999 756 168", ""],
-        ["Email: info@modernsafety.mw", ""],
-        ["Website: www.modernsafety.mw", ""]
-    ]
-    
-    # Invoice details
-    created_at = order_data['created_at']
-    if isinstance(created_at, str):
-        try:
-            created_at = datetime.fromisoformat(created_at.replace('Z', '+00:00'))
-        except:
-            created_at = datetime.now()
-    
-    invoice_info = [
-        ["Invoice Number:", order_data['order_number']],
-        ["Invoice Date:", datetime.now().strftime("%d/%m/%Y")],
-        ["Order Date:", created_at.strftime("%d/%m/%Y")],
-        ["Payment Terms:", "Due on Receipt"]
-    ]
-    
-    # Combine tables side by side
-    combined_data = []
-    for i in range(max(len(company_info), len(invoice_info))):
-        row = []
-        if i < len(company_info):
-            row.append(company_info[i][0])
-            row.append(company_info[i][1])
-        else:
-            row.extend(["", ""])
-        
-        if i < len(invoice_info):
-            row.append(invoice_info[i][0])
-            row.append(invoice_info[i][1])
-        else:
-            row.extend(["", ""])
-        
-        combined_data.append(row)
-    
-    company_invoice_table = Table(combined_data, colWidths=[2*inch, 2*inch, 1.5*inch, 2*inch])
-    company_invoice_table.setStyle(TableStyle([
-        ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
-        ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'),
-        ('FONTNAME', (2, 0), (2, -1), 'Helvetica-Bold'),
-        ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
-    ]))
-    
-    story.append(company_invoice_table)
-    story.append(Spacer(1, 20))
+    normal_style = ParagraphStyle(
+        'Normal',
+        parent=styles['Normal'],
+        fontSize=10,
+        spaceAfter=6,
+        textColor=colors.HexColor('#475569')  # Medium gray
+    )
     
     # Bill To section
     story.append(Paragraph("BILL TO", header_style))
@@ -157,11 +157,13 @@ def generate_order_invoice(order_data: dict, customer: dict):
         ["Billing Address:", order_data.get('billing_address', order_data.get('shipping_address', 'Not specified'))]
     ]
     
-    client_table = Table(client_info, colWidths=[1.5*inch, 6*inch])
+    client_table = Table(client_info, colWidths=[1.2*inch, 5.8*inch])
     client_table.setStyle(TableStyle([
         ('ALIGN', (0, 0), (0, -1), 'LEFT'),
         ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'),
-        ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
+        ('FONTSIZE', (0, 0), (-1, -1), 10),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+        ('TOPPADDING', (0, 0), (-1, -1), 4),
     ]))
     
     story.append(client_table)
@@ -170,35 +172,41 @@ def generate_order_invoice(order_data: dict, customer: dict):
     # Order items table
     story.append(Paragraph("ORDER ITEMS", header_style))
     
-    items_data = [["Item", "Description", "Quantity", "Unit Price", "Total"]]
+    items_data = [["Item", "Description", "Qty", "Unit Price", "Total"]]
     
     for item in order_data.get('items', []):
         # Truncate description if too long
-        description = item.get('product_description', '')
+        description = item.get('product_description', item.get('description', ''))
         if len(description) > 50:
             description = description[:50] + '...'
         
+        unit_price = item.get('unit_price', item.get('price', 0))
+        quantity = item.get('quantity', 1)
+        total_price = unit_price * quantity
+        
         items_data.append([
-            item.get('product_name', 'Product'),
+            item.get('product_name', item.get('name', 'Product')),
             description,
-            str(item['quantity']),
-            f"MK {item['unit_price']:,.2f}",
-            f"MK {item['total_price']:,.2f}"
+            str(quantity),
+            f"MK {unit_price:,.0f}",
+            f"MK {total_price:,.0f}"
         ])
     
-    items_table = Table(items_data, colWidths=[1.5*inch, 2.5*inch, 0.8*inch, 1.2*inch, 1.2*inch])
+    items_table = Table(items_data, colWidths=[1.2*inch, 2.8*inch, 0.6*inch, 1.2*inch, 1.2*inch])
     items_table.setStyle(TableStyle([
-        ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
-        ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#1e40af')),  # Blue header
+        ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
         ('ALIGN', (0, 0), (-1, 0), 'CENTER'),
-        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-        ('FONTSIZE', (0, 0), (-1, 0), 12),
-        ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
-        ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
         ('ALIGN', (2, 1), (2, -1), 'CENTER'),
         ('ALIGN', (3, 1), (-1, -1), 'RIGHT'),
-        ('GRID', (0, 0), (-1, -1), 1, colors.black),
+        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, 0), 11),
         ('FONTSIZE', (0, 1), (-1, -1), 10),
+        ('BOTTOMPADDING', (0, 0), (-1, 0), 8),
+        ('TOPPADDING', (0, 0), (-1, 0), 8),
+        ('BACKGROUND', (0, 1), (-1, -1), colors.HexColor('#f8fafc')),  # Light gray background
+        ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#cbd5e1')),  # Light gray grid
+        ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#f1f5f9')]),  # Alternating rows
         ('TOPPADDING', (0, 1), (-1, -1), 6),
         ('BOTTOMPADDING', (0, 1), (-1, -1), 6),
     ]))
@@ -207,12 +215,17 @@ def generate_order_invoice(order_data: dict, customer: dict):
     story.append(Spacer(1, 20))
     
     # Summary table
+    subtotal = order_data.get('subtotal', 0)
+    tax = order_data.get('tax', 0)
+    shipping_fee = order_data.get('shipping_fee', 0)
+    total_amount = order_data.get('total_amount', 0)
+    
     summary_data = [
-        ["Subtotal:", f"MK {order_data['subtotal']:,.2f}"],
-        ["Tax (16%):", f"MK {order_data.get('tax', 0):,.2f}"],
-        ["Shipping Fee:", f"MK {order_data.get('shipping_fee', 0):,.2f}"],
+        ["Subtotal:", f"MK {subtotal:,.0f}"],
+        ["Tax (16%):", f"MK {tax:,.0f}"],
+        ["Shipping Fee:", f"MK {shipping_fee:,.0f}"],
         ["", ""],
-        ["TOTAL AMOUNT:", f"MK {order_data['total_amount']:,.2f}"]
+        ["TOTAL AMOUNT:", f"MK {total_amount:,.0f}"]
     ]
     
     summary_table = Table(summary_data, colWidths=[4*inch, 2*inch])
@@ -220,10 +233,13 @@ def generate_order_invoice(order_data: dict, customer: dict):
         ('ALIGN', (0, 0), (0, -1), 'RIGHT'),
         ('ALIGN', (1, 0), (1, -1), 'RIGHT'),
         ('FONTNAME', (0, -1), (1, -1), 'Helvetica-Bold'),
-        ('FONTSIZE', (0, -1), (1, -1), 14),
-        ('LINEABOVE', (0, -1), (1, -1), 1, colors.black),
-        ('TOPPADDING', (0, -1), (1, -1), 12),
-        ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
+        ('FONTSIZE', (0, 0), (1, -2), 10),
+        ('FONTSIZE', (0, -1), (1, -1), 12),
+        ('TEXTCOLOR', (0, -1), (1, -1), colors.HexColor('#1e40af')),  # Blue for total
+        ('LINEABOVE', (0, -1), (1, -1), 1, colors.HexColor('#1e40af')),
+        ('TOPPADDING', (0, -1), (1, -1), 8),
+        ('BOTTOMPADDING', (0, -1), (1, -1), 8),
+        ('BOTTOMPADDING', (0, 0), (1, -2), 4),
     ]))
     
     story.append(summary_table)
@@ -231,47 +247,73 @@ def generate_order_invoice(order_data: dict, customer: dict):
     
     # Payment information
     payment_info = [
-        ["Payment Method:", order_data.get('payment_method', 'Not specified').upper()],
-        ["Payment Status:", order_data.get('payment_status', 'pending').upper()],
-        ["Order Status:", order_data.get('status', 'pending').upper()]
+        ["Payment Method:", order_data.get('payment_method', 'Not specified').title()],
+        ["Payment Status:", order_data.get('payment_status', 'pending').title()],
+        ["Order Status:", order_data.get('status', 'pending').title()]
     ]
     
     if order_data.get('notes'):
         payment_info.append(["Order Notes:", order_data['notes']])
     
-    payment_table = Table(payment_info, colWidths=[1.5*inch, 6*inch])
+    payment_table = Table(payment_info, colWidths=[1.2*inch, 5.8*inch])
     payment_table.setStyle(TableStyle([
         ('ALIGN', (0, 0), (0, -1), 'LEFT'),
         ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, -1), 10),
         ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
+        ('TOPPADDING', (0, 0), (-1, -1), 4),
     ]))
     
     story.append(payment_table)
     story.append(Spacer(1, 30))
     
     # Terms and conditions
+    terms_style = ParagraphStyle(
+        'Terms',
+        parent=styles['Normal'],
+        fontSize=9,
+        textColor=colors.HexColor('#64748b'),
+        spaceAfter=4
+    )
+    
+    story.append(Paragraph("TERMS AND CONDITIONS", header_style))
+    
     terms = [
-        "TERMS AND CONDITIONS:",
         "1. All prices are in Malawi Kwacha (MK)",
         "2. Payment is due within 7 days of invoice date",
         "3. Goods remain property of Modern Safety Systems until paid in full",
         "4. Returns accepted within 14 days with original receipt",
-        "5. Warranty provided as per manufacturer specifications"
+        "5. Warranty provided as per manufacturer specifications",
+        "6. Late payments are subject to 2% monthly interest"
     ]
     
     for term in terms:
-        story.append(Paragraph(term, normal_style))
+        story.append(Paragraph(term, terms_style))
     
     story.append(Spacer(1, 20))
     
-    # Thank you message
-    story.append(Paragraph("Thank you for your business!", ParagraphStyle(
-        'ThankYou',
+    # Footer with thank you message
+    footer_style = ParagraphStyle(
+        'Footer',
         parent=styles['Normal'],
-        fontSize=12,
+        fontSize=11,
         alignment=TA_CENTER,
-        spaceBefore=20
-    )))
+        spaceBefore=20,
+        textColor=colors.HexColor('#475569')
+    )
+    
+    story.append(Paragraph("Thank you for choosing Modern Safety Systems!", footer_style))
+    
+    contact_style = ParagraphStyle(
+        'Contact',
+        parent=styles['Normal'],
+        fontSize=9,
+        alignment=TA_CENTER,
+        spaceBefore=10,
+        textColor=colors.HexColor('#64748b')
+    )
+    
+    story.append(Paragraph("For any inquiries, please contact: info@modernsafety.mw | +265 999 756 168", contact_style))
     
     # Build PDF
     doc.build(story)

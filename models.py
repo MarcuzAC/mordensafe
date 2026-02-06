@@ -6,7 +6,7 @@ from enum import Enum
 from bson import ObjectId
 from pydantic.json_schema import JsonSchemaValue
 
-# Custom ObjectId handling for Pydantic v2
+
 class PyObjectId(str):
     @classmethod
     def validate_object_id(cls, v, handler) -> str:
@@ -31,7 +31,6 @@ class PyObjectId(str):
         json_schema.update(type='string', format='objectid')
         return json_schema
 
-# Base model with common config for MongoDB
 class MongoBaseModel(BaseModel):
     model_config = ConfigDict(
         arbitrary_types_allowed=True,
